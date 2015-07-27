@@ -126,6 +126,7 @@ struct secasvar {
 	u_int ivlen;			/* length of IV */
 	void *sched;			/* intermediate encryption key */
 	size_t schedlen;
+	uint64_t cntr;			/* counter for GCM and CTR */
 
 	struct secreplay *replay;	/* replay prevention */
 	time_t created;			/* for lifetime */
@@ -163,7 +164,11 @@ struct secasvar {
 #define	SECASVAR_UNLOCK(_sav)		mtx_unlock(&(_sav)->lock)
 #define	SECASVAR_LOCK_DESTROY(_sav)	mtx_destroy(&(_sav)->lock)
 #define	SECASVAR_LOCK_ASSERT(_sav)	mtx_assert(&(_sav)->lock, MA_OWNED)
-#define	SAV_ISGCM(_sav)			((_sav)->alg_enc == SADB_X_EALG_AESGCM16)
+#define	SAV_ISGCM(_sav)							\
+			((_sav)->alg_enc == SADB_X_EALG_AESGCM8 ||	\
+			(_sav)->alg_enc == SADB_X_EALG_AESGCM12 ||	\
+			(_sav)->alg_enc == SADB_X_EALG_AESGCM16)
+#define	SAV_ISCTR(_sav) ((_sav)->alg_enc == SADB_X_EALG_AESCTR)
 
 /* replay prevention */
 struct secreplay {
