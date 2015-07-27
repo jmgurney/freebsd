@@ -351,15 +351,13 @@ esp_input(struct mbuf *m, struct secasvar *sav, int skip, int protoff)
 	 */
 	plen = m->m_pkthdr.len - (skip + hlen + alen);
 	if ((plen & (espx->blocksize - 1)) || (plen <= 0)) {
-		if (!espx || sav->alg_enc != SADB_X_EALG_AESGCM16) {
-			DPRINTF(("%s: payload of %d octets not a multiple of %d octets,"
-				"  SA %s/%08lx\n", __func__,
-				plen, espx->blocksize, ipsec_address(&sav->sah->saidx.dst,
-				buf, sizeof(buf)), (u_long) ntohl(sav->spi)));
-			ESPSTAT_INC(esps_badilen);
-			m_freem(m);
-			return EINVAL;
-		}
+		DPRINTF(("%s: payload of %d octets not a multiple of %d octets,"
+		    "  SA %s/%08lx\n", __func__, plen, espx->blocksize,
+		    ipsec_address(&sav->sah->saidx.dst, buf, sizeof(buf)),
+		    (u_long)ntohl(sav->spi)));
+		ESPSTAT_INC(esps_badilen);
+		m_freem(m);
+		return EINVAL;
 	}
 
 	/*
