@@ -107,7 +107,7 @@
 #define	AES_256_HMAC_KEY_LEN		32
 
 /* Encryption algorithm block sizes */
-#define	NULL_BLOCK_LEN		4
+#define	NULL_BLOCK_LEN		4	/* IPsec to maintain alignment */
 #define	DES_BLOCK_LEN		8
 #define	DES3_BLOCK_LEN		8
 #define	BLOWFISH_BLOCK_LEN	8
