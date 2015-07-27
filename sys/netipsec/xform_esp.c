@@ -48,6 +48,7 @@
 #include <sys/random.h>
 #include <sys/rwlock.h>
 #include <sys/sysctl.h>
+#include <machine/atomic.h>
 
 #include <net/if.h>
 #include <net/vnet.h>
@@ -387,8 +388,8 @@ esp_input(struct mbuf *m, struct secasvar *sav, int skip, int protoff)
 	}
 
 	/* Get IPsec-specific opaque pointer */
-	tc = (struct tdb_crypto *) malloc(sizeof(struct tdb_crypto) + alen +
-	    SAV_ISGCM(sav) * AES_GCM_IV_LEN, M_XDATA, M_NOWAIT | M_ZERO);
+	tc = (struct tdb_crypto *) malloc(sizeof(struct tdb_crypto) + alen,
+	    M_XDATA, M_NOWAIT | M_ZERO);
 	if (tc == NULL) {
 		crypto_freereq(crp);
 		DPRINTF(("%s: failed to allocate tdb_crypto\n", __func__));
@@ -451,8 +452,7 @@ esp_input(struct mbuf *m, struct secasvar *sav, int skip, int protoff)
 	crde->crd_inject = skip + hlen - sav->ivlen;
 
 	if (SAV_ISGCM(sav)) {
-		ivp = ((uint8_t *)&tc[1]) + alen;
-		crde->crd_iv = ivp;
+		ivp = &crde->crd_iv[0];
 		crde->crd_flags |= CRD_F_IV_EXPLICIT;
 
 		/* IV Format: RFC4106 4 */
@@ -836,8 +836,8 @@ esp_output(struct mbuf *m, struct ipsecrequest *isr, struct mbuf **mp,
 	}
 
 	/* IPsec-specific opaque crypto info. */
-	tc = (struct tdb_crypto *) malloc(sizeof(struct tdb_crypto) +
-	    SAV_ISGCM(sav) * AES_GCM_IV_LEN, M_XDATA, M_NOWAIT|M_ZERO);
+	tc = (struct tdb_crypto *) malloc(sizeof(struct tdb_crypto),
+	    M_XDATA, M_NOWAIT|M_ZERO);
 	if (tc == NULL) {
 		crypto_freereq(crp);
 		DPRINTF(("%s: failed to allocate tdb_crypto\n", __func__));
@@ -861,12 +861,11 @@ esp_output(struct mbuf *m, struct ipsecrequest *isr, struct mbuf **mp,
 		crde->crd_key = sav->key_enc->key_data;
 		crde->crd_klen = _KEYBITS(sav->key_enc) - SAV_ISGCM(sav) * 32;
 		if (SAV_ISGCM(sav)) {
-			ivp = (uint8_t *)&tc[1];
-			crde->crd_iv = ivp;
+			ivp = &crde->crd_iv[0];
 			memcpy(ivp, sav->key_enc->key_data +
 			    _KEYLEN(sav->key_enc) - 4, 4);
 			/* XXX - may need to use locks instead of atomics */
-			be64enc(&ivp[4], atomic_fetchadd_64(sav->cntr));
+			be64enc(&ivp[4], atomic_fetchadd_long(&sav->cntr, 1));
 			crde->crd_flags |= CRD_F_IV_EXPLICIT|CRD_F_IV_PRESENT;
 		}
 	} else
