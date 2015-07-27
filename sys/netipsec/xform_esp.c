@@ -388,8 +388,7 @@ esp_input(struct mbuf *m, struct secasvar *sav, int skip, int protoff)
 
 	/* Get IPsec-specific opaque pointer */
 	tc = (struct tdb_crypto *) malloc(sizeof(struct tdb_crypto) + alen +
-	    SAV_ISGCM(sav) * AES_GCM_IV_LEN,
-	    M_XDATA, M_NOWAIT | M_ZERO);
+	    SAV_ISGCM(sav) * AES_GCM_IV_LEN, M_XDATA, M_NOWAIT | M_ZERO);
 	if (tc == NULL) {
 		crypto_freereq(crp);
 		DPRINTF(("%s: failed to allocate tdb_crypto\n", __func__));
@@ -671,6 +670,7 @@ esp_output(struct mbuf *m, struct ipsecrequest *isr, struct mbuf **mp,
 	char buf[INET6_ADDRSTRLEN];
 	struct enc_xform *espx;
 	struct auth_hash *esph;
+	uint8_t *ivp;
 	int hlen, rlen, padding, blks, alen, i, roff;
 	struct mbuf *mo = (struct mbuf *) NULL;
 	struct tdb_crypto *tc;
@@ -835,6 +835,17 @@ esp_output(struct mbuf *m, struct ipsecrequest *isr, struct mbuf **mp,
 		goto bad;
 	}
 
+	/* IPsec-specific opaque crypto info. */
+	tc = (struct tdb_crypto *) malloc(sizeof(struct tdb_crypto) +
+	    SAV_ISGCM(sav) * AES_GCM_IV_LEN, M_XDATA, M_NOWAIT|M_ZERO);
+	if (tc == NULL) {
+		crypto_freereq(crp);
+		DPRINTF(("%s: failed to allocate tdb_crypto\n", __func__));
+		ESPSTAT_INC(esps_crypto);
+		error = ENOBUFS;
+		goto bad;
+	}
+
 	if (espx) {
 		crde = crp->crp_desc;
 		crda = crde->crd_next;
@@ -848,22 +859,18 @@ esp_output(struct mbuf *m, struct ipsecrequest *isr, struct mbuf **mp,
 		/* Encryption operation. */
 		crde->crd_alg = espx->type;
 		crde->crd_key = sav->key_enc->key_data;
-		crde->crd_klen = _KEYBITS(sav->key_enc);
-		if (SAV_ISGCM(sav))
-			crde->crd_flags |= CRD_F_IV_EXPLICIT;
+		crde->crd_klen = _KEYBITS(sav->key_enc) - SAV_ISGCM(sav) * 32;
+		if (SAV_ISGCM(sav)) {
+			ivp = (uint8_t *)&tc[1];
+			crde->crd_iv = ivp;
+			memcpy(ivp, sav->key_enc->key_data +
+			    _KEYLEN(sav->key_enc) - 4, 4);
+			/* XXX - may need to use locks instead of atomics */
+			be64enc(&ivp[4], atomic_fetchadd_64(sav->cntr));
+			crde->crd_flags |= CRD_F_IV_EXPLICIT|CRD_F_IV_PRESENT;
+		}
 	} else
 		crda = crp->crp_desc;
-
-	/* IPsec-specific opaque crypto info. */
-	tc = (struct tdb_crypto *) malloc(sizeof(struct tdb_crypto),
-		M_XDATA, M_NOWAIT|M_ZERO);
-	if (tc == NULL) {
-		crypto_freereq(crp);
-		DPRINTF(("%s: failed to allocate tdb_crypto\n", __func__));
-		ESPSTAT_INC(esps_crypto);
-		error = ENOBUFS;
-		goto bad;
-	}
 
 	/* Callback parameters */
 	tc->tc_isr = isr;
@@ -887,8 +894,8 @@ esp_output(struct mbuf *m, struct ipsecrequest *isr, struct mbuf **mp,
 		crda->crd_skip = skip;
 		if (SAV_ISGCM(sav)) {
 			crda->crd_key = sav->key_enc->key_data;
-			crda->crd_klen = _KEYBITS(sav->key_enc);
-			crda->crd_len = hlen - sav->ivlen;
+			crda->crd_klen = _KEYBITS(sav->key_enc) - 32;
+			crda->crd_len = 8;	/* RFC4106 5, SPI + SN */
 		} else {
 			crda->crd_key = sav->key_auth->key_data;
 			crda->crd_klen = _KEYBITS(sav->key_auth);
@@ -925,7 +932,8 @@ esp_output_cb(struct cryptop *crp)
 	IPSEC_ASSERT(isr->sp != NULL, ("NULL isr->sp"));
 	IPSECREQUEST_LOCK(isr);
 	sav = tc->tc_sav;
-	/* With the isr lock released SA pointer can be updated. */
+
+	/* With the isr lock released, SA pointer may have changed. */
 	if (sav != isr->sav) {
 		ESPSTAT_INC(esps_notdb);
 		DPRINTF(("%s: SA gone during crypto (SA %s/%08lx proto %u)\n",
