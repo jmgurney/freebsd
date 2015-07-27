@@ -163,6 +163,7 @@ struct secasvar {
 #define	SECASVAR_UNLOCK(_sav)		mtx_unlock(&(_sav)->lock)
 #define	SECASVAR_LOCK_DESTROY(_sav)	mtx_destroy(&(_sav)->lock)
 #define	SECASVAR_LOCK_ASSERT(_sav)	mtx_assert(&(_sav)->lock, MA_OWNED)
+#define	SAV_ISGCM(_sav)			((_sav)->alg_enc == SADB_X_EALG_AESGCM16)
 
 /* replay prevention */
 struct secreplay {

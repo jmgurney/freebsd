@@ -189,7 +189,8 @@ esp_init(struct secasvar *sav, struct xformsw *xsp)
 			__func__));
 		return EINVAL;
 	}
-	keylen = _KEYLEN(sav->key_enc);
+	/* subtract off the salt, RFC4106, 8.1 */
+	keylen = _KEYLEN(sav->key_enc) - 4;
 	if (txform->minkey > keylen || keylen > txform->maxkey) {
 		DPRINTF(("%s: invalid key length %u, must be in the range "
 			"[%u..%u] for algorithm %s\n", __func__,
@@ -204,7 +205,10 @@ esp_init(struct secasvar *sav, struct xformsw *xsp)
 	 *      the ESP header will be processed incorrectly.  The
 	 *      compromise is to force it to zero here.
 	 */
-	sav->ivlen = (txform == &enc_xform_null ? 0 : txform->ivsize);
+	if (SAV_ISGCM(sav))
+		sav->ivlen = 8;	/* RFC4106 3.1 */
+	else
+		sav->ivlen = (txform == &enc_xform_null ? 0 : txform->ivsize);
 	sav->iv = (caddr_t) malloc(sav->ivlen, M_XDATA, M_WAITOK);
 	key_randomfill(sav->iv, sav->ivlen);	/*XXX*/
 
@@ -248,19 +252,15 @@ esp_init(struct secasvar *sav, struct xformsw *xsp)
 		}
 		bzero(&cria, sizeof(cria));
 		cria.cri_alg = sav->tdb_authalgxform->type;
-		cria.cri_klen = _KEYBITS(sav->key_enc) + 4;
+		cria.cri_klen = _KEYBITS(sav->key_enc);
 		cria.cri_key = sav->key_enc->key_data;
 	}
 
 	/* Initialize crypto session. */
-	bzero(&crie, sizeof (crie));
+	bzero(&crie, sizeof(crie));
 	crie.cri_alg = sav->tdb_encalgxform->type;
 	crie.cri_klen = _KEYBITS(sav->key_enc);
 	crie.cri_key = sav->key_enc->key_data;
-	if (sav->alg_enc == SADB_X_EALG_AESGCM16)
-		arc4rand(crie.cri_iv, sav->ivlen, 0);
-
-	/* XXX Rounds ? */
 
 	if (sav->tdb_authalgxform && sav->tdb_encalgxform) {
 		/* init both auth & enc */
@@ -407,20 +407,18 @@ esp_input(struct mbuf *m, struct secasvar *sav, int skip, int protoff)
 
 		/* Authentication descriptor */
 		crda->crd_skip = skip;
-		if (espx && espx->type == CRYPTO_AES_NIST_GCM_16) 
-			crda->crd_len = hlen - sav->ivlen;
-		else
-			crda->crd_len = m->m_pkthdr.len - (skip + alen);
-		crda->crd_inject = m->m_pkthdr.len - alen;
-
-		crda->crd_alg = esph->type;
-		if (espx && (espx->type == CRYPTO_AES_NIST_GCM_16)) {
+		if (SAV_ISGCM(sav)) {
 			crda->crd_key = sav->key_enc->key_data;
-			crda->crd_klen = _KEYBITS(sav->key_enc);
+			crda->crd_klen = _KEYBITS(sav->key_enc) - 32;
+			crda->crd_len = hlen - 8;	/* RFC4106 3.1 */
 		} else {
 			crda->crd_key = sav->key_auth->key_data;
 			crda->crd_klen = _KEYBITS(sav->key_auth);
-		}	
+			crda->crd_len = m->m_pkthdr.len - (skip + alen);
+		}
+		crda->crd_inject = m->m_pkthdr.len - alen;
+
+		crda->crd_alg = esph->type;
 
 		/* Copy the authenticator */
 		m_copydata(m, m->m_pkthdr.len - alen, alen,
@@ -458,7 +456,7 @@ esp_input(struct mbuf *m, struct secasvar *sav, int skip, int protoff)
 	crde->crd_alg = espx->type;
 	crde->crd_key = sav->key_enc->key_data;
 	crde->crd_klen = _KEYBITS(sav->key_enc);
-	if (espx && (espx->type == CRYPTO_AES_NIST_GCM_16))
+	if (SAV_ISGCM(sav))
 		crde->crd_flags |= CRD_F_IV_EXPLICIT;
 
 	/* XXX Rounds ? */
@@ -845,9 +843,8 @@ esp_output(struct mbuf *m, struct ipsecrequest *isr, struct mbuf **mp,
 		crde->crd_alg = espx->type;
 		crde->crd_key = sav->key_enc->key_data;
 		crde->crd_klen = _KEYBITS(sav->key_enc);
-		if (espx->type == CRYPTO_AES_NIST_GCM_16)
+		if (SAV_ISGCM(sav))
 			crde->crd_flags |= CRD_F_IV_EXPLICIT;
-		/* XXX Rounds ? */
 	} else
 		crda = crp->crp_desc;
 
@@ -880,23 +877,18 @@ esp_output(struct mbuf *m, struct ipsecrequest *isr, struct mbuf **mp,
 
 	if (esph) {
 		/* Authentication descriptor. */
-		crda->crd_skip = skip;
-		if (espx && espx->type == CRYPTO_AES_NIST_GCM_16)
-			crda->crd_len = hlen - sav->ivlen;
-		else
-			crda->crd_len = m->m_pkthdr.len - (skip + alen);
-		crda->crd_inject = m->m_pkthdr.len - alen;
-
-		/* Authentication operation. */
 		crda->crd_alg = esph->type;
-		if (espx && espx->type == CRYPTO_AES_NIST_GCM_16) {
+		crda->crd_skip = skip;
+		if (SAV_ISGCM(sav)) {
 			crda->crd_key = sav->key_enc->key_data;
 			crda->crd_klen = _KEYBITS(sav->key_enc);
+			crda->crd_len = hlen - sav->ivlen;
 		} else {
 			crda->crd_key = sav->key_auth->key_data;
 			crda->crd_klen = _KEYBITS(sav->key_auth);
+			crda->crd_len = m->m_pkthdr.len - (skip + alen);
 		}
-
+		crda->crd_inject = m->m_pkthdr.len - alen;
 	}
 
 	return crypto_dispatch(crp);
