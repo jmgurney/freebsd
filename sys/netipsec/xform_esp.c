@@ -408,13 +408,12 @@ esp_input(struct mbuf *m, struct secasvar *sav, int skip, int protoff)
 		if (SAV_ISGCM(sav)) {
 			crda->crd_key = sav->key_enc->key_data;
 			crda->crd_klen = _KEYBITS(sav->key_enc) - 32;
-			crda->crd_len = 12;	/* RFC4106 5, SPI + ESN */
+			crda->crd_len = 8;	/* RFC4106 5, SPI + SN */
 		} else {
 			crda->crd_key = sav->key_auth->key_data;
 			crda->crd_klen = _KEYBITS(sav->key_auth);
 			crda->crd_len = m->m_pkthdr.len - (skip + alen);
 		}
-		/* XXX - not correct for ESN and GCM! */
 		crda->crd_inject = m->m_pkthdr.len - alen;
 
 		crda->crd_alg = esph->type;
