@@ -370,7 +370,6 @@ struct sadb_x_nat_t_frag {
 #define SADB_X_EALG_CAMELLIACBC		22
 #define	SADB_X_EALG_AESGMAC		23 /* RFC4543 + Errata1821 */
 /* private allocations should use 249-255 (RFC2407) */
-#define SADB_X_EALG_SKIPJACK	249	/*250*/ /* for IPSEC */
 #define SADB_X_EALG_AESCTR	250	/*249*/ /* draft-ietf-ipsec-ciph-aes-ctr-03 */
 
 /* private allocations - based on RFC2407/IANA assignment */
