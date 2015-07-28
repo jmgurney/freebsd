@@ -302,6 +302,35 @@ esp_zeroize(struct secasvar *sav)
 	return error;
 }
 
+static int
+ah_len(struct auth_hash *esph)
+{
+	int alen;
+
+	if (esph == NULL)
+		return 0;
+
+	switch (esph->type) {
+	case CRYPTO_SHA2_256_HMAC:
+	case CRYPTO_SHA2_384_HMAC:
+	case CRYPTO_SHA2_512_HMAC:
+		alen = esph->hashsize / 2;
+		break;
+
+	case CRYPTO_AES_128_NIST_GMAC:
+	case CRYPTO_AES_192_NIST_GMAC:
+	case CRYPTO_AES_256_NIST_GMAC:
+		alen = esph->hashsize;
+		break;
+
+	default:
+		alen = AH_HMAC_HASHLEN;
+		break;
+	}
+
+	return alen;
+}
+
 /*
  * ESP input processing, called (eventually) through the protocol switch.
  */
@@ -320,7 +349,6 @@ esp_input(struct mbuf *m, struct secasvar *sav, int skip, int protoff)
 	IPSEC_ASSERT(sav != NULL, ("null SA"));
 	IPSEC_ASSERT(sav->tdb_encalgxform != NULL, ("null encoding xform"));
 
-	alen = 0;
 	/* Valid IP Packet length ? */
 	if ( (skip&3) || (m->m_pkthdr.len&3) ){
 		DPRINTF(("%s: misaligned packet, skip %u pkt len %u",
@@ -335,13 +363,13 @@ esp_input(struct mbuf *m, struct secasvar *sav, int skip, int protoff)
 	esph = sav->tdb_authalgxform;
 	espx = sav->tdb_encalgxform;
 
-	/* Determine the ESP header length */
+	/* Determine the ESP header and auth length*/
 	if (sav->flags & SADB_X_EXT_OLD)
 		hlen = sizeof (struct esp) + sav->ivlen;
 	else
 		hlen = sizeof (struct newesp) + sav->ivlen;
-	/* Authenticator hash size */
-	alen = esph ? esph->hashsize : 0;
+
+	alen = ah_len(esph);
 
 	/*
 	 * Verify payload length is multiple of encryption algorithm
@@ -530,7 +558,7 @@ esp_input_cb(struct cryptop *crp)
 
 	/* If authentication was performed, check now. */
 	if (esph != NULL) {
-		alen = esph->hashsize;
+		alen = ah_len(esph);
 		AHSTAT_INC(ahs_hist[sav->alg_auth]);
 		/* Copy the authenticator from the packet */
 		m_copydata(m, m->m_pkthdr.len - alen, alen, aalg);
@@ -700,10 +728,7 @@ esp_output(struct mbuf *m, struct ipsecrequest *isr, struct mbuf **mp,
 	/* XXX clamp padding length a la KAME??? */
 	padding = ((blks - ((rlen + 2) % blks)) % blks) + 2;
 
-	if (esph)
-		alen = esph->hashsize;
-	else
-		alen = 0;
+	alen = ah_len(esph);
 
 	ESPSTAT_INC(esps_output);
 
@@ -983,21 +1008,7 @@ esp_output_cb(struct cryptop *crp)
 		if (esph !=  NULL) {
 			int alen;
 
-			switch (esph->type) {
-			case CRYPTO_SHA2_256_HMAC:
-			case CRYPTO_SHA2_384_HMAC:
-			case CRYPTO_SHA2_512_HMAC:
-				alen = esph->hashsize/2;
-				break;
-			case CRYPTO_AES_128_NIST_GMAC:
-			case CRYPTO_AES_192_NIST_GMAC:
-			case CRYPTO_AES_256_NIST_GMAC:
-				alen = esph->hashsize;
-				break;
-			default:
-				alen = AH_HMAC_HASHLEN;
-				break;
-			}
+			alen = ah_len(esph);
 			m_copyback(m, m->m_pkthdr.len - alen,
 			    alen, ipseczeroes);
 		}
