@@ -251,14 +251,14 @@ esp_init(struct secasvar *sav, struct xformsw *xsp)
 		}
 		bzero(&cria, sizeof(cria));
 		cria.cri_alg = sav->tdb_authalgxform->type;
-		cria.cri_klen = _KEYBITS(sav->key_enc);
+		cria.cri_klen = _KEYBITS(sav->key_enc) - SAV_ISGCM(sav) * 32;
 		cria.cri_key = sav->key_enc->key_data;
 	}
 
 	/* Initialize crypto session. */
 	bzero(&crie, sizeof(crie));
 	crie.cri_alg = sav->tdb_encalgxform->type;
-	crie.cri_klen = _KEYBITS(sav->key_enc);
+	crie.cri_klen = _KEYBITS(sav->key_enc) - SAV_ISGCM(sav) * 32;
 	crie.cri_key = sav->key_enc->key_data;
 
 	if (sav->tdb_authalgxform && sav->tdb_encalgxform) {
