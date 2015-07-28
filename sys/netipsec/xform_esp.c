@@ -698,7 +698,7 @@ esp_output(struct mbuf *m, struct ipsecrequest *isr, struct mbuf **mp,
 	/*
 	 * RFC4303 2.4 Requires 4 byte alignment.
 	 */
-	blks = MIN(4, espx->blocksize);		/* Cipher blocksize */
+	blks = MAX(4, espx->blocksize);		/* Cipher blocksize */
 
 	/* XXX clamp padding length a la KAME??? */
 	padding = ((blks - ((rlen + 2) % blks)) % blks) + 2;
