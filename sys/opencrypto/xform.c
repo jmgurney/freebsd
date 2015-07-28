@@ -139,7 +139,7 @@ static	int SHA512Update_int(void *, const u_int8_t *, u_int16_t);
 static	u_int32_t deflate_compress(u_int8_t *, u_int32_t, u_int8_t **);
 static	u_int32_t deflate_decompress(u_int8_t *, u_int32_t, u_int8_t **);
 
-#define AESICM_BLOCKSIZE	16
+#define AESICM_BLOCKSIZE	AES_BLOCK_LEN
 
 struct aes_icm_ctx {
 	u_int32_t	ac_ek[4*(RIJNDAEL_MAXNR + 1)];
