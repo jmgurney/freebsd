@@ -314,7 +314,7 @@ ah_len(struct auth_hash *esph)
 	case CRYPTO_SHA2_256_HMAC:
 	case CRYPTO_SHA2_384_HMAC:
 	case CRYPTO_SHA2_512_HMAC:
-		alen = esph->hashsize / 2;
+		alen = esph->hashsize / 2;	/* RFC4868 2.3 */
 		break;
 
 	case CRYPTO_AES_128_NIST_GMAC:
