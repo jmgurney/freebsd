@@ -302,35 +302,6 @@ esp_zeroize(struct secasvar *sav)
 	return error;
 }
 
-static int
-ah_len(struct auth_hash *esph)
-{
-	int alen;
-
-	if (esph == NULL)
-		return 0;
-
-	switch (esph->type) {
-	case CRYPTO_SHA2_256_HMAC:
-	case CRYPTO_SHA2_384_HMAC:
-	case CRYPTO_SHA2_512_HMAC:
-		alen = esph->hashsize / 2;	/* RFC4868 2.3 */
-		break;
-
-	case CRYPTO_AES_128_NIST_GMAC:
-	case CRYPTO_AES_192_NIST_GMAC:
-	case CRYPTO_AES_256_NIST_GMAC:
-		alen = esph->hashsize;
-		break;
-
-	default:
-		alen = AH_HMAC_HASHLEN;
-		break;
-	}
-
-	return alen;
-}
-
 /*
  * ESP input processing, called (eventually) through the protocol switch.
  */
@@ -369,7 +340,7 @@ esp_input(struct mbuf *m, struct secasvar *sav, int skip, int protoff)
 	else
 		hlen = sizeof (struct newesp) + sav->ivlen;
 
-	alen = ah_len(esph);
+	alen = xform_ah_authsize(esph);
 
 	/*
 	 * Verify payload length is multiple of encryption algorithm
@@ -558,7 +529,7 @@ esp_input_cb(struct cryptop *crp)
 
 	/* If authentication was performed, check now. */
 	if (esph != NULL) {
-		alen = ah_len(esph);
+		alen = xform_ah_authsize(esph);
 		AHSTAT_INC(ahs_hist[sav->alg_auth]);
 		/* Copy the authenticator from the packet */
 		m_copydata(m, m->m_pkthdr.len - alen, alen, aalg);
@@ -728,7 +699,7 @@ esp_output(struct mbuf *m, struct ipsecrequest *isr, struct mbuf **mp,
 	/* XXX clamp padding length a la KAME??? */
 	padding = ((blks - ((rlen + 2) % blks)) % blks) + 2;
 
-	alen = ah_len(esph);
+	alen = xform_ah_authsize(esph);
 
 	ESPSTAT_INC(esps_output);
 
@@ -1008,7 +979,7 @@ esp_output_cb(struct cryptop *crp)
 		if (esph !=  NULL) {
 			int alen;
 
-			alen = ah_len(esph);
+			alen = xform_ah_authsize(esph);
 			m_copyback(m, m->m_pkthdr.len - alen,
 			    alen, ipseczeroes);
 		}
