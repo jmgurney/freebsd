@@ -231,15 +231,15 @@ esp_init(struct secasvar *sav, struct xformsw *xsp)
 	 */
 	if (sav->alg_enc == SADB_X_EALG_AESGCM16) {
 		switch (keylen) {
-		case AES_128_HMAC_KEY_LEN:
+		case AES_128_GMAC_KEY_LEN:
 			sav->alg_auth = SADB_X_AALG_AES128GMAC;
 			sav->tdb_authalgxform = &auth_hash_nist_gmac_aes_128;
 			break;
-		case AES_192_HMAC_KEY_LEN:
+		case AES_192_GMAC_KEY_LEN:
 			sav->alg_auth = SADB_X_AALG_AES192GMAC;
 			sav->tdb_authalgxform = &auth_hash_nist_gmac_aes_192;
 			break;
-		case AES_256_HMAC_KEY_LEN:
+		case AES_256_GMAC_KEY_LEN:
 			sav->alg_auth = SADB_X_AALG_AES256GMAC;
 			sav->tdb_authalgxform = &auth_hash_nist_gmac_aes_256;
 			break;
