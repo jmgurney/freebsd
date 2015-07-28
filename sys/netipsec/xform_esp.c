@@ -320,7 +320,6 @@ esp_input(struct mbuf *m, struct secasvar *sav, int skip, int protoff)
 	IPSEC_ASSERT(sav != NULL, ("null SA"));
 	IPSEC_ASSERT(sav->tdb_encalgxform != NULL, ("null encoding xform"));
 
-	alen = 0;
 	/* Valid IP Packet length ? */
 	if ( (skip&3) || (m->m_pkthdr.len&3) ){
 		DPRINTF(("%s: misaligned packet, skip %u pkt len %u",
@@ -340,6 +339,7 @@ esp_input(struct mbuf *m, struct secasvar *sav, int skip, int protoff)
 		hlen = sizeof (struct esp) + sav->ivlen;
 	else
 		hlen = sizeof (struct newesp) + sav->ivlen;
+
 	/* Authenticator hash size */
 	alen = esph ? esph->hashsize : 0;
 
