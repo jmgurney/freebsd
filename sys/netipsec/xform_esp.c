@@ -696,10 +696,9 @@ esp_output(struct mbuf *m, struct ipsecrequest *isr, struct mbuf **mp,
 
 	rlen = m->m_pkthdr.len - skip;	/* Raw payload length. */
 	/*
-	 * NB: The null encoding transform has a blocksize of 4
-	 *     so that headers are properly aligned.
+	 * RFC4303 2.4 Requires 4 byte alignment.
 	 */
-	blks = espx->ivsize;		/* IV blocksize */
+	blks = MIN(4, espx->blocksize);		/* Cipher blocksize */
 
 	/* XXX clamp padding length a la KAME??? */
 	padding = ((blks - ((rlen + 2) % blks)) % blks) + 2;
