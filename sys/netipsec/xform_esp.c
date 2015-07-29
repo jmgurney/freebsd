@@ -851,6 +851,7 @@ esp_output(struct mbuf *m, struct ipsecrequest *isr, struct mbuf **mp,
 		    _KEYLEN(sav->key_enc) - 4, 4);
 		/* XXX - may need to use locks instead of atomics */
 		be64enc(&ivp[4], atomic_fetchadd_long(&sav->cntr, 1));
+		m_copyback(m, skip + hlen - sav->ivlen, sav->ivlen, &ivp[4]);
 		crde->crd_flags |= CRD_F_IV_EXPLICIT|CRD_F_IV_PRESENT;
 	}
 
