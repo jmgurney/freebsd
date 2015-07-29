@@ -404,15 +404,10 @@ esp_input(struct mbuf *m, struct secasvar *sav, int skip, int protoff)
 
 		/* Authentication descriptor */
 		crda->crd_skip = skip;
-		if (SAV_ISGCM(sav)) {
-			crda->crd_key = sav->key_enc->key_data;
-			crda->crd_klen = _KEYBITS(sav->key_enc) - 32;
+		if (SAV_ISGCM(sav))
 			crda->crd_len = 8;	/* RFC4106 5, SPI + SN */
-		} else {
-			crda->crd_key = sav->key_auth->key_data;
-			crda->crd_klen = _KEYBITS(sav->key_auth);
+		else
 			crda->crd_len = m->m_pkthdr.len - (skip + alen);
-		}
 		crda->crd_inject = m->m_pkthdr.len - alen;
 
 		crda->crd_alg = esph->type;
@@ -462,8 +457,6 @@ esp_input(struct mbuf *m, struct secasvar *sav, int skip, int protoff)
 	}
 
 	crde->crd_alg = espx->type;
-	crde->crd_key = sav->key_enc->key_data;
-	crde->crd_klen = _KEYBITS(sav->key_enc) - SAV_ISGCM(sav) * 32;
 
 	return (crypto_dispatch(crp));
 }
@@ -852,8 +845,6 @@ esp_output(struct mbuf *m, struct ipsecrequest *isr, struct mbuf **mp,
 
 	/* Encryption operation. */
 	crde->crd_alg = espx->type;
-	crde->crd_key = sav->key_enc->key_data;
-	crde->crd_klen = _KEYBITS(sav->key_enc) - SAV_ISGCM(sav) * 32;
 	if (SAV_ISGCM(sav)) {
 		ivp = &crde->crd_iv[0];
 		memcpy(ivp, sav->key_enc->key_data +
@@ -883,15 +874,10 @@ esp_output(struct mbuf *m, struct ipsecrequest *isr, struct mbuf **mp,
 		/* Authentication descriptor. */
 		crda->crd_alg = esph->type;
 		crda->crd_skip = skip;
-		if (SAV_ISGCM(sav)) {
-			crda->crd_key = sav->key_enc->key_data;
-			crda->crd_klen = _KEYBITS(sav->key_enc) - 32;
+		if (SAV_ISGCM(sav))
 			crda->crd_len = 8;	/* RFC4106 5, SPI + SN */
-		} else {
-			crda->crd_key = sav->key_auth->key_data;
-			crda->crd_klen = _KEYBITS(sav->key_auth);
+		else
 			crda->crd_len = m->m_pkthdr.len - (skip + alen);
-		}
 		crda->crd_inject = m->m_pkthdr.len - alen;
 	}
 
