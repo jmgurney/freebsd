@@ -821,7 +821,7 @@ esp_output(struct mbuf *m, struct ipsecrequest *isr, struct mbuf **mp,
 	m_copyback(m, protoff, sizeof(u_int8_t), (u_char *) &prot);
 
 	/* Get crypto descriptors. */
-	crp = crypto_getreq(esph && espx ? 2 : 1);
+	crp = crypto_getreq(esph != NULL ? 2 : 1);
 	if (crp == NULL) {
 		DPRINTF(("%s: failed to acquire crypto descriptors\n",
 			__func__));
@@ -841,30 +841,27 @@ esp_output(struct mbuf *m, struct ipsecrequest *isr, struct mbuf **mp,
 		goto bad;
 	}
 
-	if (espx) {
-		crde = crp->crp_desc;
-		crda = crde->crd_next;
+	crde = crp->crp_desc;
+	crda = crde->crd_next;
 
-		/* Encryption descriptor. */
-		crde->crd_skip = skip + hlen;
-		crde->crd_len = m->m_pkthdr.len - (skip + hlen + alen);
-		crde->crd_flags = CRD_F_ENCRYPT;
-		crde->crd_inject = skip + hlen - sav->ivlen;
+	/* Encryption descriptor. */
+	crde->crd_skip = skip + hlen;
+	crde->crd_len = m->m_pkthdr.len - (skip + hlen + alen);
+	crde->crd_flags = CRD_F_ENCRYPT;
+	crde->crd_inject = skip + hlen - sav->ivlen;
 
-		/* Encryption operation. */
-		crde->crd_alg = espx->type;
-		crde->crd_key = sav->key_enc->key_data;
-		crde->crd_klen = _KEYBITS(sav->key_enc) - SAV_ISGCM(sav) * 32;
-		if (SAV_ISGCM(sav)) {
-			ivp = &crde->crd_iv[0];
-			memcpy(ivp, sav->key_enc->key_data +
-			    _KEYLEN(sav->key_enc) - 4, 4);
-			/* XXX - may need to use locks instead of atomics */
-			be64enc(&ivp[4], atomic_fetchadd_long(&sav->cntr, 1));
-			crde->crd_flags |= CRD_F_IV_EXPLICIT|CRD_F_IV_PRESENT;
-		}
-	} else
-		crda = crp->crp_desc;
+	/* Encryption operation. */
+	crde->crd_alg = espx->type;
+	crde->crd_key = sav->key_enc->key_data;
+	crde->crd_klen = _KEYBITS(sav->key_enc) - SAV_ISGCM(sav) * 32;
+	if (SAV_ISGCM(sav)) {
+		ivp = &crde->crd_iv[0];
+		memcpy(ivp, sav->key_enc->key_data +
+		    _KEYLEN(sav->key_enc) - 4, 4);
+		/* XXX - may need to use locks instead of atomics */
+		be64enc(&ivp[4], atomic_fetchadd_long(&sav->cntr, 1));
+		crde->crd_flags |= CRD_F_IV_EXPLICIT|CRD_F_IV_PRESENT;
+	}
 
 	/* Callback parameters */
 	tc->tc_isr = isr;
