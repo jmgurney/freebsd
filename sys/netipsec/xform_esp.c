@@ -183,13 +183,14 @@ esp_init(struct secasvar *sav, struct xformsw *xsp)
 			 __func__, txform->name));
 		return EINVAL;
 	}
-	if ((sav->flags&(SADB_X_EXT_OLD|SADB_X_EXT_IV4B)) == SADB_X_EXT_IV4B) {
+	if ((sav->flags & (SADB_X_EXT_OLD | SADB_X_EXT_IV4B)) ==
+	    SADB_X_EXT_IV4B) {
 		DPRINTF(("%s: 4-byte IV not supported with protocol\n",
 			__func__));
 		return EINVAL;
 	}
-	/* subtract off the salt, RFC4106, 8.1 */
-	keylen = _KEYLEN(sav->key_enc) - SAV_ISGCM(sav) * 4;
+	/* subtract off the salt, RFC4106, 8.1 and RFC3686, 5.1 */
+	keylen = _KEYLEN(sav->key_enc) - SAV_ISCTRORGCM(sav) * 4;
 	if (txform->minkey > keylen || keylen > txform->maxkey) {
 		DPRINTF(("%s: invalid key length %u, must be in the range "
 			"[%u..%u] for algorithm %s\n", __func__,
@@ -204,12 +205,10 @@ esp_init(struct secasvar *sav, struct xformsw *xsp)
 	 *      the ESP header will be processed incorrectly.  The
 	 *      compromise is to force it to zero here.
 	 */
-	if (SAV_ISGCM(sav))
-		sav->ivlen = 8;	/* RFC4106 3.1 */
+	if (SAV_ISCTRORGCM(sav))
+		sav->ivlen = 8;	/* RFC4106 3.1 and RFC3686 3.1 */
 	else
 		sav->ivlen = (txform == &enc_xform_null ? 0 : txform->ivsize);
-	sav->iv = (caddr_t) malloc(sav->ivlen, M_XDATA, M_WAITOK);
-	key_randomfill(sav->iv, sav->ivlen);	/*XXX*/
 
 	/*
 	 * Setup AH-related state.
@@ -251,15 +250,15 @@ esp_init(struct secasvar *sav, struct xformsw *xsp)
 		}
 		bzero(&cria, sizeof(cria));
 		cria.cri_alg = sav->tdb_authalgxform->type;
-		cria.cri_klen = _KEYBITS(sav->key_enc) - SAV_ISGCM(sav) * 32;
 		cria.cri_key = sav->key_enc->key_data;
+		cria.cri_klen = _KEYBITS(sav->key_enc) - SAV_ISGCM(sav) * 32;
 	}
 
 	/* Initialize crypto session. */
 	bzero(&crie, sizeof(crie));
 	crie.cri_alg = sav->tdb_encalgxform->type;
-	crie.cri_klen = _KEYBITS(sav->key_enc) - SAV_ISGCM(sav) * 32;
 	crie.cri_key = sav->key_enc->key_data;
+	crie.cri_klen = _KEYBITS(sav->key_enc) - SAV_ISCTRORGCM(sav) * 32;
 
 	if (sav->tdb_authalgxform && sav->tdb_encalgxform) {
 		/* init both auth & enc */
@@ -292,10 +291,6 @@ esp_zeroize(struct secasvar *sav)
 
 	if (sav->key_enc)
 		bzero(sav->key_enc->key_data, _KEYLEN(sav->key_enc));
-	if (sav->iv) {
-		free(sav->iv, M_XDATA);
-		sav->iv = NULL;
-	}
 	sav->tdb_encalgxform = NULL;
 	sav->tdb_xform = NULL;
 	return error;
@@ -445,15 +440,23 @@ esp_input(struct mbuf *m, struct secasvar *sav, int skip, int protoff)
 	crde->crd_len = m->m_pkthdr.len - (skip + hlen + alen);
 	crde->crd_inject = skip + hlen - sav->ivlen;
 
-	if (SAV_ISGCM(sav)) {
+	if (SAV_ISCTRORGCM(sav)) {
 		ivp = &crde->crd_iv[0];
 		crde->crd_flags |= CRD_F_IV_EXPLICIT;
 
-		/* IV Format: RFC4106 4 */
+		/* GCM IV Format: RFC4106 4 */
+		/* CTR IV Format: RFC3686 4 */
 		/* Salt is last four bytes of key, RFC4106 8.1 */
+		/* Nonce is last four bytes of key, RFC3686 5.1 */
 		memcpy(ivp, sav->key_enc->key_data +
 		    _KEYLEN(sav->key_enc) - 4, 4);
-		m_copydata(m, skip + hlen - sav->ivlen, sav->ivlen, ivp + 4);
+
+		if (SAV_ISCTR(sav)) {
+			/* Initial block counter is 1, RFC3686 4 */
+			be32enc(&ivp[sav->ivlen + 4], 1);
+		}
+
+		m_copydata(m, skip + hlen - sav->ivlen, sav->ivlen, &ivp[4]);
 	}
 
 	crde->crd_alg = espx->type;
@@ -845,12 +848,23 @@ esp_output(struct mbuf *m, struct ipsecrequest *isr, struct mbuf **mp,
 
 	/* Encryption operation. */
 	crde->crd_alg = espx->type;
-	if (SAV_ISGCM(sav)) {
+	if (SAV_ISCTRORGCM(sav)) {
 		ivp = &crde->crd_iv[0];
+
+		/* GCM IV Format: RFC4106 4 */
+		/* CTR IV Format: RFC3686 4 */
+		/* Salt is last four bytes of key, RFC4106 8.1 */
+		/* Nonce is last four bytes of key, RFC3686 5.1 */
 		memcpy(ivp, sav->key_enc->key_data +
 		    _KEYLEN(sav->key_enc) - 4, 4);
 		/* XXX - may need to use locks instead of atomics */
 		be64enc(&ivp[4], atomic_fetchadd_long(&sav->cntr, 1));
+
+		if (SAV_ISCTR(sav)) {
+			/* Initial block counter is 1, RFC3686 4 */
+			be32enc(&ivp[sav->ivlen + 4], 1);
+		}
+
 		m_copyback(m, skip + hlen - sav->ivlen, sav->ivlen, &ivp[4]);
 		crde->crd_flags |= CRD_F_IV_EXPLICIT|CRD_F_IV_PRESENT;
 	}

@@ -122,7 +122,6 @@ struct secasvar {
 
 	struct seckey *key_auth;	/* Key for Authentication */
 	struct seckey *key_enc;	        /* Key for Encryption */
-	caddr_t iv;			/* Initilization Vector */
 	u_int ivlen;			/* length of IV */
 	void *sched;			/* intermediate encryption key */
 	size_t schedlen;
@@ -169,6 +168,7 @@ struct secasvar {
 			(_sav)->alg_enc == SADB_X_EALG_AESGCM12 ||	\
 			(_sav)->alg_enc == SADB_X_EALG_AESGCM16)
 #define	SAV_ISCTR(_sav) ((_sav)->alg_enc == SADB_X_EALG_AESCTR)
+#define SAV_ISCTRORGCM(_sav)	(SAV_ISCTR((_sav)) || SAV_ISGCM((_sav)))
 
 /* replay prevention */
 struct secreplay {
