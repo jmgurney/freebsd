@@ -353,34 +353,28 @@ struct sadb_x_nat_t_frag {
 #define SADB_X_AALG_TCP_MD5	252	/* Keyed TCP-MD5 (RFC2385) */
 
 /*
- * Encryption Algorithm Transform IDs
- * http://www.iana.org/assignments/ikev2-parameters/ikev2-parameters.xhtml#ikev2-parameters-5
+ * Though some of these numbers appear to be IKEv2 numbers and others
+ * original IKE numbers, they have no meaning.  These are constants that
+ * the various IKE daemons use to tell the kernel what cipher to use.
  *
- * Not that the above and the RFC's disagree with some of the assignments.
- * NetBSD used the ones for the RFC, and that is  the ones we've had, so
- * keep them.
- *
- * These numbers appear to be IKEv2 numbers.
+ * Do not use these constants directly to decide which Transformation ID
+ * to send.  You are responsible for mapping them yourself.
  */
-/* RFC2367 numbers - meets RFC2407 */
 #define SADB_EALG_NONE		0
 #define SADB_EALG_DESCBC	2
 #define SADB_EALG_3DESCBC	3
-#define SADB_EALG_NULL		11
-#define SADB_EALG_MAX		22	/* !!! keep updated !!! */
-/* private allocations - based on RFC2407/IANA assignment */
 #define SADB_X_EALG_CAST128CBC	6
 #define SADB_X_EALG_BLOWFISHCBC	7
+#define SADB_EALG_NULL		11
 #define SADB_X_EALG_RIJNDAELCBC	12
-#define SADB_X_EALG_AES		12	/* RFC3602 */
-#define SADB_X_EALG_AESCTR	13	/* RFC3686 */
-#define SADB_X_EALG_AESGCM8	18	/* RFC4106 */
-#define SADB_X_EALG_AESGCM12	19	/* RFC4106 */
-#define SADB_X_EALG_AESGCM16	20	/* RFC4106 */
-#define SADB_X_EALG_AESGMAC	21	/* RFC4543 + Errata1821 */
-/* private allocations - based on RFC4312/IANA assignment */
-#define SADB_X_EALG_CAMELLIACBC	22	/* RFC4312 */
-/* private allocations should use 1024-65535 */
+#define SADB_X_EALG_AES		12
+#define SADB_X_EALG_AESCTR	13
+#define SADB_X_EALG_AESGCM8	18
+#define SADB_X_EALG_AESGCM12	19
+#define SADB_X_EALG_AESGCM16	20
+#define SADB_X_EALG_CAMELLIACBC	22
+#define SADB_X_EALG_AESGMAC	23
+#define SADB_EALG_MAX		23	/* !!! keep updated !!! */
 
 /* private allocations - based on RFC2407/IANA assignment */
 #define SADB_X_CALG_NONE	0
