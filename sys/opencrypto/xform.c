@@ -139,7 +139,7 @@ static	int SHA512Update_int(void *, const u_int8_t *, u_int16_t);
 static	u_int32_t deflate_compress(u_int8_t *, u_int32_t, u_int8_t **);
 static	u_int32_t deflate_decompress(u_int8_t *, u_int32_t, u_int8_t **);
 
-#define AESICM_BLOCKSIZE	16
+#define AESICM_BLOCKSIZE	AES_BLOCK_LEN
 
 struct aes_icm_ctx {
 	u_int32_t	ac_ek[4*(RIJNDAEL_MAXNR + 1)];
@@ -353,7 +353,7 @@ struct auth_hash auth_hash_hmac_sha2_512 = {
 
 struct auth_hash auth_hash_nist_gmac_aes_128 = {
 	CRYPTO_AES_128_NIST_GMAC, "GMAC-AES-128",
-	AES_128_HMAC_KEY_LEN, AES_HASH_LEN, sizeof(struct aes_gmac_ctx),
+	AES_128_GMAC_KEY_LEN, AES_GMAC_HASH_LEN, sizeof(struct aes_gmac_ctx),
 	GMAC_BLOCK_LEN,
 	(void (*)(void *)) AES_GMAC_Init,
 	(void (*)(void *, const u_int8_t *, u_int16_t)) AES_GMAC_Setkey,
@@ -364,7 +364,7 @@ struct auth_hash auth_hash_nist_gmac_aes_128 = {
 
 struct auth_hash auth_hash_nist_gmac_aes_192 = {
 	CRYPTO_AES_192_NIST_GMAC, "GMAC-AES-192",
-	AES_192_HMAC_KEY_LEN, AES_HASH_LEN, sizeof(struct aes_gmac_ctx),
+	AES_192_GMAC_KEY_LEN, AES_GMAC_HASH_LEN, sizeof(struct aes_gmac_ctx),
 	GMAC_BLOCK_LEN,
 	(void (*)(void *)) AES_GMAC_Init,
 	(void (*)(void *, const u_int8_t *, u_int16_t)) AES_GMAC_Setkey,
@@ -375,7 +375,7 @@ struct auth_hash auth_hash_nist_gmac_aes_192 = {
 
 struct auth_hash auth_hash_nist_gmac_aes_256 = {
 	CRYPTO_AES_256_NIST_GMAC, "GMAC-AES-256",
-	AES_256_HMAC_KEY_LEN, AES_HASH_LEN, sizeof(struct aes_gmac_ctx),
+	AES_256_GMAC_KEY_LEN, AES_GMAC_HASH_LEN, sizeof(struct aes_gmac_ctx),
 	GMAC_BLOCK_LEN,
 	(void (*)(void *)) AES_GMAC_Init,
 	(void (*)(void *, const u_int8_t *, u_int16_t)) AES_GMAC_Setkey,
