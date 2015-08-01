@@ -442,7 +442,6 @@ esp_input(struct mbuf *m, struct secasvar *sav, int skip, int protoff)
 
 	if (SAV_ISCTRORGCM(sav)) {
 		ivp = &crde->crd_iv[0];
-		crde->crd_flags |= CRD_F_IV_EXPLICIT;
 
 		/* GCM IV Format: RFC4106 4 */
 		/* CTR IV Format: RFC3686 4 */
@@ -457,6 +456,7 @@ esp_input(struct mbuf *m, struct secasvar *sav, int skip, int protoff)
 		}
 
 		m_copydata(m, skip + hlen - sav->ivlen, sav->ivlen, &ivp[4]);
+		crde->crd_flags |= CRD_F_IV_EXPLICIT;
 	}
 
 	crde->crd_alg = espx->type;
