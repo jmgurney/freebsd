@@ -719,6 +719,9 @@ aes_icm_setkey(u_int8_t **sched, u_int8_t *key, int len)
 {
 	struct aes_icm_ctx *ctx;
 
+	if (len != 16 && len != 24 && len != 32)
+		return EINVAL;
+
 	*sched = malloc(sizeof(struct aes_icm_ctx), M_CRYPTO_DATA,
 	    M_NOWAIT | M_ZERO);
 	if (*sched == NULL)
@@ -726,8 +729,6 @@ aes_icm_setkey(u_int8_t **sched, u_int8_t *key, int len)
 
 	ctx = (struct aes_icm_ctx *)*sched;
 	ctx->ac_nr = rijndaelKeySetupEnc(ctx->ac_ek, (u_char *)key, len * 8);
-	if (ctx->ac_nr == 0)
-		return EINVAL;
 	return 0;
 }
 
