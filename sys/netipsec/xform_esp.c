@@ -48,6 +48,7 @@
 #include <sys/random.h>
 #include <sys/rwlock.h>
 #include <sys/sysctl.h>
+#include <sys/mutex.h>
 #include <machine/atomic.h>
 
 #include <net/if.h>
@@ -666,6 +667,7 @@ esp_output(struct mbuf *m, struct ipsecrequest *isr, struct mbuf **mp,
 	struct enc_xform *espx;
 	struct auth_hash *esph;
 	uint8_t *ivp;
+	uint64_t cntr;
 	int hlen, rlen, padding, blks, alen, i, roff;
 	struct mbuf *mo = (struct mbuf *) NULL;
 	struct tdb_crypto *tc;
@@ -857,8 +859,10 @@ esp_output(struct mbuf *m, struct ipsecrequest *isr, struct mbuf **mp,
 		/* Nonce is last four bytes of key, RFC3686 5.1 */
 		memcpy(ivp, sav->key_enc->key_data +
 		    _KEYLEN(sav->key_enc) - 4, 4);
-		/* XXX - may need to use locks instead of atomics */
-		be64enc(&ivp[4], atomic_fetchadd_long(&sav->cntr, 1));
+		SECASVAR_LOCK(sav);
+		cntr = sav->cntr++;
+		SECASVAR_UNLOCK(sav);
+		be64enc(&ivp[4], cntr);
 
 		if (SAV_ISCTR(sav)) {
 			/* Initial block counter is 1, RFC3686 4 */
