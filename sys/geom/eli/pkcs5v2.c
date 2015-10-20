@@ -67,10 +67,7 @@ pkcs5v2_genkey(uint8_t *key, unsigned keylen, const uint8_t *salt,
 	for (count = 1; keylen > 0; count++, keylen -= bsize, keyp += bsize) {
 		bsize = MIN(keylen, sizeof(md));
 
-		counter[0] = (count >> 24) & 0xff;
-		counter[1] = (count >> 16) & 0xff;
-		counter[2] = (count >> 8) & 0xff;
-		counter[3] = count & 0xff;
+		be32enc(counter, count);
 
 		g_eli_crypto_hmac_init(&startpoint, passphrase, passlen);
 		ctx = startpoint;
