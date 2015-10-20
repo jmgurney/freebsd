@@ -56,6 +56,7 @@ pkcs5v2_genkey(uint8_t *key, unsigned keylen, const uint8_t *salt,
 	uint8_t *counter, *keyp;
 	u_int i, bsize, passlen;
 	uint32_t count;
+	struct hmac_ctx startpoint, ctx;
 
 	passlen = strlen(passphrase);
 	bzero(key, keylen);
@@ -70,16 +71,22 @@ pkcs5v2_genkey(uint8_t *key, unsigned keylen, const uint8_t *salt,
 		counter[1] = (count >> 16) & 0xff;
 		counter[2] = (count >> 8) & 0xff;
 		counter[3] = count & 0xff;
-		g_eli_crypto_hmac(passphrase, passlen, saltcount,
-		    sizeof(saltcount), md, 0);
+
+		g_eli_crypto_hmac_init(&startpoint, passphrase, passlen);
+		ctx = startpoint;
+		g_eli_crypto_hmac_update(&ctx, saltcount, sizeof(saltcount));
+		g_eli_crypto_hmac_final(&ctx, md, sizeof(md));
 		xor(keyp, md, bsize);
 
 		for(i = 1; i < iterations; i++) {
-			g_eli_crypto_hmac(passphrase, passlen, md, sizeof(md),
-			    md, 0);
+			ctx = startpoint;
+			g_eli_crypto_hmac_update(&ctx, md, sizeof(md));
+			g_eli_crypto_hmac_final(&ctx, md, sizeof(md));
 			xor(keyp, md, bsize);
 		}
 	}
+	bzero(&startpoint, sizeof(startpoint));
+	bzero(&ctx, sizeof(ctx));
 }
 
 #ifndef _KERNEL
