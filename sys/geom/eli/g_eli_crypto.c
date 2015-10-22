@@ -263,7 +263,7 @@ g_eli_crypto_hmac_update(struct hmac_ctx *ctx, const uint8_t *data,
     size_t datasize)
 {
 
-	SHA512_Update(&ctx->shactx, data, datasize);
+	SHA512_Update(&ctx->innerctx, data, datasize);
 }
 
 void
