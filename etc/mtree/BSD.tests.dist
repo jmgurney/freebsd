@@ -271,9 +271,15 @@
                     ..
                 ..
             ..
+            nss
+            ..
             regex
                 data
                 ..
+            ..
+            resolv
+            ..
+            rpc
             ..
             ssp
             ..
@@ -371,10 +377,20 @@
         file
         ..
         kern
+            acct
+            ..
             execve
+            ..
+            pipe
             ..
         ..
         kqueue
+        ..
+        mac
+            bsdextended
+            ..
+            portacl
+            ..
         ..
         mqueue
         ..
@@ -552,6 +568,8 @@
         ..
         lastcomm
         ..
+        limits
+        ..
         m4
         ..
         mkimg
@@ -596,11 +614,15 @@
         ..
         fstyp
         ..
+        makefs
+        ..
         newsyslog
         ..
         nmtree
         ..
         pw
+        ..
+        rpcbind
         ..
         sa
         ..
