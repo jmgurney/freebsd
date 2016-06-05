@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2010-2015 Solarflare Communications Inc.
+ * Copyright (c) 2010-2016 Solarflare Communications Inc.
  * All rights reserved.
  *
  * This software was developed in part by Philip Paeps under contract for
@@ -34,7 +34,8 @@
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
-#include <sys/types.h>
+#include <sys/param.h>
+#include <sys/malloc.h>
 #include <sys/mbuf.h>
 #include <sys/smp.h>
 #include <sys/socket.h>
@@ -179,8 +180,7 @@ sfxge_rx_post_refill(void *arg)
 	sc = rxq->sc;
 	index = rxq->index;
 	evq = sc->evq[index];
-
-	magic = SFXGE_MAGIC_RX_QREFILL | index;
+	magic = sfxge_sw_ev_rxq_magic(SFXGE_SW_EV_RX_QREFILL, rxq);
 
 	/* This is guaranteed due to the start/stop order of rx and ev */
 	KASSERT(evq->init_state == SFXGE_EVQ_STARTED,
@@ -203,25 +203,6 @@ sfxge_rx_schedule_refill(struct sfxge_rxq *rxq, boolean_t retrying)
 
 	callout_reset_curcpu(&rxq->refill_callout, rxq->refill_delay,
 			     sfxge_rx_post_refill, rxq);
-}
-
-static struct mbuf *sfxge_rx_alloc_mbuf(struct sfxge_softc *sc)
-{
-	struct mb_args args;
-	struct mbuf *m;
-
-	/* Allocate mbuf structure */
-	args.flags = M_PKTHDR;
-	args.type = MT_DATA;
-	m = (struct mbuf *)uma_zalloc_arg(zone_mbuf, &args, M_NOWAIT);
-
-	/* Allocate (and attach) packet buffer */
-	if (m != NULL && !uma_zalloc_arg(sc->rx_buffer_zone, m, M_NOWAIT)) {
-		uma_zfree(zone_mbuf, m);
-		m = NULL;
-	}
-
-	return (m);
 }
 
 #define	SFXGE_REFILL_BATCH  64
@@ -273,7 +254,8 @@ sfxge_rx_qfill(struct sfxge_rxq *rxq, unsigned int target, boolean_t retrying)
 		KASSERT(rx_desc->mbuf == NULL, ("rx_desc->mbuf != NULL"));
 
 		rx_desc->flags = EFX_DISCARD;
-		m = rx_desc->mbuf = sfxge_rx_alloc_mbuf(sc);
+		m = rx_desc->mbuf = m_getjcl(M_NOWAIT, MT_DATA, M_PKTHDR,
+		    sc->rx_cluster_size);
 		if (m == NULL)
 			break;
 
@@ -846,11 +828,11 @@ sfxge_rx_qcomplete(struct sfxge_rxq *rxq, boolean_t eop)
 		if (rx_desc->flags & (EFX_ADDR_MISMATCH | EFX_DISCARD))
 			goto discard;
 
-		/* Read the length from the psuedo header if required */
+		/* Read the length from the pseudo header if required */
 		if (rx_desc->flags & EFX_PKT_PREFIX_LEN) {
 			uint16_t tmp_size;
 			int rc;
-			rc = efx_psuedo_hdr_pkt_length_get(sc->enp, 
+			rc = efx_psuedo_hdr_pkt_length_get(sc->enp,
 							   mtod(m, uint8_t *),
 							   &tmp_size);
 			KASSERT(rc == 0, ("cannot get packet length: %d", rc));
@@ -1041,7 +1023,7 @@ sfxge_rx_qstart(struct sfxge_softc *sc, unsigned int index)
 		return (rc);
 
 	/* Create the common code receive queue. */
-	if ((rc = efx_rx_qcreate(sc->enp, index, index, EFX_RXQ_TYPE_DEFAULT,
+	if ((rc = efx_rx_qcreate(sc->enp, index, 0, EFX_RXQ_TYPE_DEFAULT,
 	    esmp, sc->rxq_entries, rxq->buf_base_id, evq->common,
 	    &rxq->common)) != 0)
 		goto fail;
@@ -1117,7 +1099,7 @@ sfxge_rx_start(struct sfxge_softc *sc)
 	EFSYS_ASSERT(ISP2(align));
 	sc->rx_buffer_size = P2ROUNDUP(sc->rx_buffer_size, align);
 
-	/* 
+	/*
 	 * Standard mbuf zones only guarantee pointer-size alignment;
 	 * we need extra space to align to the cache line
 	 */
@@ -1125,13 +1107,13 @@ sfxge_rx_start(struct sfxge_softc *sc)
 
 	/* Select zone for packet buffers */
 	if (reserved <= MCLBYTES)
-		sc->rx_buffer_zone = zone_clust;
+		sc->rx_cluster_size = MCLBYTES;
 	else if (reserved <= MJUMPAGESIZE)
-		sc->rx_buffer_zone = zone_jumbop;
+		sc->rx_cluster_size = MJUMPAGESIZE;
 	else if (reserved <= MJUM9BYTES)
-		sc->rx_buffer_zone = zone_jumbo9;
+		sc->rx_cluster_size = MJUM9BYTES;
 	else
-		sc->rx_buffer_zone = zone_jumbo16;
+		sc->rx_cluster_size = MJUM16BYTES;
 
 	/*
 	 * Set up the scale table.  Enable all hash types and hash insertion.

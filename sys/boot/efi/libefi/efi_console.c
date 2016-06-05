@@ -47,6 +47,8 @@ static int esc;
 void get_pos(int *x, int *y);
 void curs_move(int *_x, int *_y, int x, int y);
 static void CL(int);
+void HO(void);
+void end_term(void);
 #endif
 
 static void efi_cons_probe(struct console *);
@@ -59,7 +61,7 @@ int efi_cons_poll(void);
 struct console efi_console = {
 	"efi",
 	"EFI console",
-	0,
+	C_WIDEOUT,
 	efi_cons_probe,
 	efi_cons_init,
 	efi_cons_putchar,
@@ -264,6 +266,8 @@ CL(int direction)
 	case 2:         /* entire line */
 		len = x;
 		break;
+	default:	/* NOTREACHED */
+		__unreachable();
 	}
 
 	if (cury == y - 1)

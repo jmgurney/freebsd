@@ -68,8 +68,11 @@ static void		extract_currdev(void);
 static int		isa_inb(int port);
 static void		isa_outb(int port, int value);
 void			exit(int code);
+#ifdef LOADER_GELI_SUPPORT
+struct geli_boot_args	*gargs;
+#endif
 #ifdef LOADER_ZFS_SUPPORT
-static void		init_zfs_bootenv(char *currdev);
+struct zfs_boot_args	*zargs;
 static void		i386_zfs_probe(void);
 #endif
 
@@ -138,9 +141,9 @@ main(void)
     cons_probe();
 
     /*
-     * Initialise the block cache
+     * Initialise the block cache. Set the upper limit.
      */
-    bcache_init(32, 512);	/* 16k cache XXX tune this */
+    bcache_init(32768, 512);
 
     /*
      * Special handling for PXE and CD booting.
@@ -165,7 +168,31 @@ main(void)
     archsw.arch_isaoutb = isa_outb;
 #ifdef LOADER_ZFS_SUPPORT
     archsw.arch_zfs_probe = i386_zfs_probe;
-#endif
+
+#ifdef LOADER_GELI_SUPPORT
+    if ((kargs->bootflags & KARGS_FLAGS_EXTARG) != 0) {
+	zargs = (struct zfs_boot_args *)(kargs + 1);
+	if (zargs != NULL && zargs->size >= offsetof(struct zfs_boot_args, gelipw)) {
+	    if (zargs->gelipw[0] != '\0') {
+		setenv("kern.geom.eli.passphrase", zargs->gelipw, 1);
+		bzero(zargs->gelipw, sizeof(zargs->gelipw));
+	    }
+	}
+    }
+#endif /* LOADER_GELI_SUPPORT */
+#else /* !LOADER_ZFS_SUPPORT */
+#ifdef LOADER_GELI_SUPPORT
+    if ((kargs->bootflags & KARGS_FLAGS_EXTARG) != 0) {
+	gargs = (struct geli_boot_args *)(kargs + 1);
+	if (gargs != NULL && gargs->size >= offsetof(struct geli_boot_args, gelipw)) {
+	    if (gargs->gelipw[0] != '\0') {
+		setenv("kern.geom.eli.passphrase", gargs->gelipw, 1);
+		bzero(gargs->gelipw, sizeof(gargs->gelipw));
+	    }
+	}
+    }
+#endif /* LOADER_GELI_SUPPORT */
+#endif /* LOADER_ZFS_SUPPORT */
 
     /*
      * March through the device switch probing for things.
@@ -215,7 +242,6 @@ extract_currdev(void)
     struct i386_devdesc		new_currdev;
 #ifdef LOADER_ZFS_SUPPORT
     char			buf[20];
-    struct zfs_boot_args	*zargs;
 #endif
     int				biosdev = -1;
 
@@ -296,7 +322,8 @@ extract_currdev(void)
     }
 
 #ifdef LOADER_ZFS_SUPPORT
-    init_zfs_bootenv(zfs_fmtdev(&new_currdev));
+    if (new_currdev.d_type == DEVT_ZFS)
+	init_zfs_bootenv(zfs_fmtdev(&new_currdev));
 #endif
 
     env_setenv("currdev", EV_VOLATILE, i386_fmtdev(&new_currdev),
@@ -304,31 +331,6 @@ extract_currdev(void)
     env_setenv("loaddev", EV_VOLATILE, i386_fmtdev(&new_currdev), env_noset,
 	       env_nounset);
 }
-
-#ifdef LOADER_ZFS_SUPPORT
-static void
-init_zfs_bootenv(char *currdev)
-{
-	char *beroot;
-
-	/* Remove the trailing : */
-	currdev[strlen(currdev) - 1] = '\0';
-	setenv("zfs_be_active", currdev, 1);
-	/* Do not overwrite if already set */
-	setenv("vfs.root.mountfrom", currdev, 0);
-	/* Forward past zfs: */
-	currdev = strchr(currdev, ':');
-	currdev++;
-	/* Remove the last element (current bootenv) */
-	beroot = strrchr(currdev, '/');
-	if (beroot != NULL)
-		beroot[0] = '\0';
-
-	beroot = currdev;
-	
-	setenv("zfs_be_root", beroot, 1);
-}
-#endif
 
 COMMAND_SET(reboot, "reboot", "reboot the system", command_reboot);
 
@@ -394,6 +396,7 @@ static int
 command_reloadbe(int argc, char *argv[])
 {
     int err;
+    char *root;
 
     if (argc > 2) {
 	command_errmsg = "wrong number of arguments";
@@ -403,6 +406,11 @@ command_reloadbe(int argc, char *argv[])
     if (argc == 2) {
 	err = zfs_bootenv(argv[1]);
     } else {
+	root = getenv("zfs_be_root");
+	if (root == NULL) {
+	    /* There does not appear to be a ZFS pool here, exit without error */
+	    return (CMD_OK);
+	}
 	err = zfs_bootenv(getenv("zfs_be_root"));
     }
 

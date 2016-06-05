@@ -322,6 +322,13 @@ trap(struct trapframe *frame)
 			break;
 
 		case T_PAGEFLT:		/* page fault */
+			/*
+			 * Emulator can take care about this trap?
+			 */
+			if (*p->p_sysent->sv_trap != NULL &&
+			    (*p->p_sysent->sv_trap)(td) == 0)
+				goto userout;
+
 			addr = frame->tf_addr;
 			i = trap_pfault(frame, TRUE);
 			if (i == -1)
@@ -952,6 +959,10 @@ amd64_syscall(struct thread *td, int traced)
 	KASSERT(td->td_pcb->pcb_save == get_pcb_user_save_td(td),
 	    ("System call %s returning with mangled pcb_save",
 	     syscallname(td->td_proc, sa.code)));
+	KASSERT(td->td_md.md_invl_gen.gen == 0,
+	    ("System call %s returning with leaked invl_gen %lu",
+	    syscallname(td->td_proc, sa.code), td->td_md.md_invl_gen.gen));
+
 
 	syscallret(td, error, &sa);
 

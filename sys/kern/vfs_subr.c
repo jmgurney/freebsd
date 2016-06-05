@@ -104,6 +104,7 @@ static void	syncer_shutdown(void *arg, int howto);
 static int	vtryrecycle(struct vnode *vp);
 static void	v_init_counters(struct vnode *);
 static void	v_incr_usecount(struct vnode *);
+static void	v_incr_usecount_locked(struct vnode *);
 static void	v_incr_devcount(struct vnode *);
 static void	v_decr_devcount(struct vnode *);
 static void	vnlru_free(int);
@@ -406,6 +407,27 @@ vnode_fini(void *mem, int size)
 	rw_destroy(BO_LOCKPTR(bo));
 }
 
+/*
+ * Provide the size of NFS nclnode and NFS fh for calculation of the
+ * vnode memory consumption.  The size is specified directly to
+ * eliminate dependency on NFS-private header.
+ *
+ * Other filesystems may use bigger or smaller (like UFS and ZFS)
+ * private inode data, but the NFS-based estimation is ample enough.
+ * Still, we care about differences in the size between 64- and 32-bit
+ * platforms.
+ *
+ * Namecache structure size is heuristically
+ * sizeof(struct namecache_ts) + CACHE_PATH_CUTOFF + 1.
+ */
+#ifdef _LP64
+#define	NFS_NCLNODE_SZ	(528 + 64)
+#define	NC_SZ		148
+#else
+#define	NFS_NCLNODE_SZ	(360 + 32)
+#define	NC_SZ		92
+#endif
+
 static void
 vntblinit(void *dummy __unused)
 {
@@ -421,12 +443,12 @@ vntblinit(void *dummy __unused)
 	 * marginal ratio of desiredvnodes to the physical memory size is
 	 * 1:64.  However, desiredvnodes is limited by the kernel's heap
 	 * size.  The memory required by desiredvnodes vnodes and vm objects
-	 * must not exceed 1/7th of the kernel's heap size.
+	 * must not exceed 1/10th of the kernel's heap size.
 	 */
 	physvnodes = maxproc + pgtok(vm_cnt.v_page_count) / 64 +
 	    3 * min(98304 * 16, pgtok(vm_cnt.v_page_count)) / 64;
-	virtvnodes = vm_kmem_size / (7 * (sizeof(struct vm_object) +
-	    sizeof(struct vnode)));
+	virtvnodes = vm_kmem_size / (10 * (sizeof(struct vm_object) +
+	    sizeof(struct vnode) + NC_SZ * ncsizefactor + NFS_NCLNODE_SZ));
 	desiredvnodes = min(physvnodes, virtvnodes);
 	if (desiredvnodes > MAXVNODES_MAX) {
 		if (bootverbose)
@@ -512,7 +534,7 @@ vfs_busy(struct mount *mp, int flags)
 	MNT_ILOCK(mp);
 	MNT_REF(mp);
 	/*
-	 * If mount point is currenly being unmounted, sleep until the
+	 * If mount point is currently being unmounted, sleep until the
 	 * mount point fate is decided.  If thread doing the unmounting fails,
 	 * it will clear MNTK_UNMOUNT flag before waking us up, indicating
 	 * that this mount point has survived the unmount attempt and vfs_busy
@@ -808,7 +830,7 @@ vattr_null(struct vattr *vap)
  * the buffer cache may have references on the vnode, a directory
  * vnode may still have references due to the namei cache representing
  * underlying files, or the vnode may be in active use.   It is not
- * desireable to reuse such vnodes.  These conditions may cause the
+ * desirable to reuse such vnodes.  These conditions may cause the
  * number of vnodes to reach some minimum value regardless of what
  * you set kern.maxvnodes to.  Do not set kern.maxvnodes too low.
  */
@@ -1672,7 +1694,8 @@ bnoreuselist(struct bufv *bufv, struct bufobj *bo, daddr_t startn, daddr_t endn)
 	for (lblkno = startn;;) {
 again:
 		bp = BUF_PCTRIE_LOOKUP_GE(&bufv->bv_root, lblkno);
-		if (bp == NULL || bp->b_lblkno >= endn)
+		if (bp == NULL || bp->b_lblkno >= endn ||
+		    bp->b_lblkno < startn)
 			break;
 		error = BUF_TIMELOCK(bp, LK_EXCLUSIVE | LK_SLEEPFAIL |
 		    LK_INTERLOCK, BO_LOCKPTR(bo), "brlsfl", 0, 0);
@@ -1722,7 +1745,7 @@ vtruncbuf(struct vnode *vp, struct ucred *cred, off_t length, int blksize)
 	/*
 	 * Round up to the *next* lbn.
 	 */
-	trunclbn = (length + blksize - 1) / blksize;
+	trunclbn = howmany(length, blksize);
 
 	ASSERT_VOP_LOCKED(vp, "vtruncbuf");
 restart:
@@ -2080,7 +2103,7 @@ sched_sync(void)
 		if (syncer_state != SYNCER_RUNNING &&
 		    starttime != time_uptime) {
 			if (first_printf) {
-				printf("\nSyncing disks, vnodes remaining...");
+				printf("\nSyncing disks, vnodes remaining... ");
 				first_printf = 0;
 			}
 			printf("%d ", net_worklist_len);
@@ -2371,6 +2394,20 @@ v_init_counters(struct vnode *vp)
 	refcount_init(&vp->v_usecount, 1);
 }
 
+static void
+v_incr_usecount_locked(struct vnode *vp)
+{
+
+	ASSERT_VI_LOCKED(vp, __func__);
+	if ((vp->v_iflag & VI_OWEINACT) != 0) {
+		VNASSERT(vp->v_usecount == 0, vp,
+		    ("vnode with usecount and VI_OWEINACT set"));
+		vp->v_iflag &= ~VI_OWEINACT;
+	}
+	refcount_acquire(&vp->v_usecount);
+	v_incr_devcount(vp);
+}
+
 /*
  * Increment the use and hold counts on the vnode, taking care to reference
  * the driver's usecount if this is a chardev.  The _vhold() will remove
@@ -2383,29 +2420,13 @@ v_incr_usecount(struct vnode *vp)
 	ASSERT_VI_UNLOCKED(vp, __func__);
 	CTR2(KTR_VFS, "%s: vp %p", __func__, vp);
 
-	if (vp->v_type == VCHR) {
-		VI_LOCK(vp);
-		_vhold(vp, true);
-		if (vp->v_iflag & VI_OWEINACT) {
-			VNASSERT(vp->v_usecount == 0, vp,
-			    ("vnode with usecount and VI_OWEINACT set"));
-			vp->v_iflag &= ~VI_OWEINACT;
-		}
-		refcount_acquire(&vp->v_usecount);
-		v_incr_devcount(vp);
-		VI_UNLOCK(vp);
-		return;
-	}
-
-	_vhold(vp, false);
-	if (vfs_refcount_acquire_if_not_zero(&vp->v_usecount)) {
+	if (vp->v_type != VCHR &&
+	    vfs_refcount_acquire_if_not_zero(&vp->v_usecount)) {
 		VNASSERT((vp->v_iflag & VI_OWEINACT) == 0, vp,
 		    ("vnode with usecount and VI_OWEINACT set"));
 	} else {
 		VI_LOCK(vp);
-		if (vp->v_iflag & VI_OWEINACT)
-			vp->v_iflag &= ~VI_OWEINACT;
-		refcount_acquire(&vp->v_usecount);
+		v_incr_usecount_locked(vp);
 		VI_UNLOCK(vp);
 	}
 }
@@ -2520,7 +2541,17 @@ vref(struct vnode *vp)
 {
 
 	CTR2(KTR_VFS, "%s: vp %p", __func__, vp);
+	_vhold(vp, false);
 	v_incr_usecount(vp);
+}
+
+void
+vrefl(struct vnode *vp)
+{
+
+	CTR2(KTR_VFS, "%s: vp %p", __func__, vp);
+	_vhold(vp, true);
+	v_incr_usecount_locked(vp);
 }
 
 /*
@@ -3914,7 +3945,7 @@ destroy_vpollinfo(struct vpollinfo *vi)
 }
 
 /*
- * Initalize per-vnode helper structure to hold poll-related state.
+ * Initialize per-vnode helper structure to hold poll-related state.
  */
 void
 v_addpollinfo(struct vnode *vp)
@@ -4325,7 +4356,7 @@ extattr_check_cred(struct vnode *vp, int attrnamespace, struct ucred *cred,
 
 #ifdef DEBUG_VFS_LOCKS
 /*
- * This only exists to supress warnings from unlocked specfs accesses.  It is
+ * This only exists to suppress warnings from unlocked specfs accesses.  It is
  * no longer ok to have an unlocked VFS.
  */
 #define	IGNORE_LOCK(vp) (panicstr != NULL || (vp) == NULL ||		\
@@ -4619,10 +4650,27 @@ void
 vop_rename_post(void *ap, int rc)
 {
 	struct vop_rename_args *a = ap;
+	long hint;
 
 	if (!rc) {
-		VFS_KNOTE_UNLOCKED(a->a_fdvp, NOTE_WRITE);
-		VFS_KNOTE_UNLOCKED(a->a_tdvp, NOTE_WRITE);
+		hint = NOTE_WRITE;
+		if (a->a_fdvp == a->a_tdvp) {
+			if (a->a_tvp != NULL && a->a_tvp->v_type == VDIR)
+				hint |= NOTE_LINK;
+			VFS_KNOTE_UNLOCKED(a->a_fdvp, hint);
+			VFS_KNOTE_UNLOCKED(a->a_tdvp, hint);
+		} else {
+			hint |= NOTE_EXTEND;
+			if (a->a_fvp->v_type == VDIR)
+				hint |= NOTE_LINK;
+			VFS_KNOTE_UNLOCKED(a->a_fdvp, hint);
+
+			if (a->a_fvp->v_type == VDIR && a->a_tvp != NULL &&
+			    a->a_tvp->v_type == VDIR)
+				hint &= ~NOTE_LINK;
+			VFS_KNOTE_UNLOCKED(a->a_tdvp, hint);
+		}
+
 		VFS_KNOTE_UNLOCKED(a->a_fvp, NOTE_RENAME);
 		if (a->a_tvp)
 			VFS_KNOTE_UNLOCKED(a->a_tvp, NOTE_DELETE);
@@ -4672,6 +4720,45 @@ vop_symlink_post(void *ap, int rc)
 
 	if (!rc)
 		VFS_KNOTE_LOCKED(a->a_dvp, NOTE_WRITE);
+}
+
+void
+vop_open_post(void *ap, int rc)
+{
+	struct vop_open_args *a = ap;
+
+	if (!rc)
+		VFS_KNOTE_LOCKED(a->a_vp, NOTE_OPEN);
+}
+
+void
+vop_close_post(void *ap, int rc)
+{
+	struct vop_close_args *a = ap;
+
+	if (!rc && (a->a_cred != NOCRED || /* filter out revokes */
+	    (a->a_vp->v_iflag & VI_DOOMED) == 0)) {
+		VFS_KNOTE_LOCKED(a->a_vp, (a->a_fflag & FWRITE) != 0 ?
+		    NOTE_CLOSE_WRITE : NOTE_CLOSE);
+	}
+}
+
+void
+vop_read_post(void *ap, int rc)
+{
+	struct vop_read_args *a = ap;
+
+	if (!rc)
+		VFS_KNOTE_LOCKED(a->a_vp, NOTE_READ);
+}
+
+void
+vop_readdir_post(void *ap, int rc)
+{
+	struct vop_readdir_args *a = ap;
+
+	if (!rc)
+		VFS_KNOTE_LOCKED(a->a_vp, NOTE_READ);
 }
 
 static struct knlist fs_knlist;
@@ -4966,6 +5053,7 @@ vfs_read_dirent(struct vop_readdir_args *ap, struct dirent *dp, off_t off)
 	*ap->a_cookies = realloc(*ap->a_cookies,
 	    (*ap->a_ncookies + 1) * sizeof(u_long), M_TEMP, M_WAITOK | M_ZERO);
 	(*ap->a_cookies)[*ap->a_ncookies] = off;
+	*ap->a_ncookies += 1;
 	return (0);
 }
 

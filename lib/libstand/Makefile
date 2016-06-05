@@ -6,6 +6,7 @@
 #   quite large.
 #
 
+PACKAGE=lib${LIB}
 MK_PROFILE=	no
 MK_SSP=		no
 
@@ -25,7 +26,7 @@ WARNS?=		0
 CFLAGS+= -I${LIBSTAND_SRC}
 
 # standalone components and stuff we have modified locally
-SRCS+=	gzguts.h zutil.h __main.c assert.c bcd.c bswap.c environment.c getopt.c gets.c \
+SRCS+=	gzguts.h zutil.h __main.c assert.c bcd.c environment.c getopt.c gets.c \
 	globals.c pager.c printf.c strdup.c strerror.c strtol.c strtoul.c random.c \
 	sbrk.c twiddle.c zalloc.c zalloc_malloc.c
 
@@ -49,7 +50,11 @@ SRCS+=	bcmp.c bcopy.c bzero.c ffs.c fls.c \
 # Do not generate movt/movw, because the relocation fixup for them does not
 # translate to the -Bsymbolic -pie format required by self_reloc() in loader(8).
 # Also, the fpu is not available in a standalone environment.
+.if ${COMPILER_VERSION} < 30800
 CFLAGS.clang+=	-mllvm -arm-use-movt=0
+.else
+CFLAGS.clang+=	-mno-movt
+.endif
 CFLAGS.clang+=	-mfpu=none
 
 # Compiler support functions
@@ -65,8 +70,8 @@ SRCS+=	aeabi_idivmod.S aeabi_ldivmod.S aeabi_uidivmod.S aeabi_uldivmod.S
 SRCS+=	aeabi_memcmp.S aeabi_memcpy.S aeabi_memmove.S aeabi_memset.S
 .endif
 
-.if ${MACHINE_CPUARCH} == "aarch64"
-.PATH: ${LIBC_SRC}/aarch64/gen
+.if ${MACHINE_CPUARCH} == "aarch64" || ${MACHINE_CPUARCH} == "riscv"
+.PATH: ${LIBC_SRC}/${MACHINE_CPUARCH}/gen
 .endif
 
 .if ${MACHINE_CPUARCH} == "powerpc"

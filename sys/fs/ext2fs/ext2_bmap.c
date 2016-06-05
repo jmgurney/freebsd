@@ -42,6 +42,7 @@
 #include <sys/proc.h>
 #include <sys/vnode.h>
 #include <sys/mount.h>
+#include <sys/racct.h>
 #include <sys/resourcevar.h>
 #include <sys/stat.h>
 
@@ -102,9 +103,6 @@ ext4_bmapext(struct vnode *vp, int32_t bn, int64_t *bnp, int *runp, int *runb)
 	fs = ip->i_e2fs;
 	lbn = bn;
 
-	/*
-	 * TODO: need to implement read ahead to improve the performance.
-	 */
 	if (runp != NULL)
 		*runp = 0;
 
@@ -112,15 +110,29 @@ ext4_bmapext(struct vnode *vp, int32_t bn, int64_t *bnp, int *runp, int *runb)
 		*runb = 0;
 
 	ext4_ext_find_extent(fs, ip, lbn, &path);
-	ep = path.ep_ext;
-	if (ep == NULL)
-		ret = EIO;
-	else {
-		*bnp = fsbtodb(fs, lbn - ep->e_blk +
-		    (ep->e_start_lo | (daddr_t)ep->e_start_hi << 32));
+	if (path.ep_is_sparse) {
+		*bnp = -1;
+		if (runp != NULL)
+			*runp = path.ep_sparse_ext.e_len -
+			    (lbn - path.ep_sparse_ext.e_blk) - 1;
+		if (runb != NULL)
+			*runb = lbn - path.ep_sparse_ext.e_blk;
+	} else {
+		ep = path.ep_ext;
+		if (ep == NULL)
+			ret = EIO;
+		else {
+			*bnp = fsbtodb(fs, lbn - ep->e_blk +
+			    (ep->e_start_lo | (daddr_t)ep->e_start_hi << 32));
 
-		if (*bnp == 0)
-			*bnp = -1;
+			if (*bnp == 0)
+				*bnp = -1;
+
+			if (runp != NULL)
+				*runp = ep->e_len - (lbn - ep->e_blk) - 1;
+			if (runb != NULL)
+				*runb = lbn - ep->e_blk;
+		}
 	}
 
 	if (path.ep_bp != NULL) {
@@ -236,6 +248,13 @@ ext2_bmaparray(struct vnode *vp, daddr_t bn, daddr_t *bnp, int *runp, int *runb)
 			vfs_busy_pages(bp, 0);
 			bp->b_iooffset = dbtob(bp->b_blkno);
 			bstrategy(bp);
+#ifdef RACCT
+			if (racct_enable) {
+				PROC_LOCK(curproc);
+				racct_add_buf(curproc, bp, 0);
+				PROC_UNLOCK(curproc);
+			}
+#endif
 			curthread->td_ru.ru_inblock++;
 			error = bufwait(bp);
 			if (error) {

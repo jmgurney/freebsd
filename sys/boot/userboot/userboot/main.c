@@ -41,9 +41,9 @@ __FBSDID("$FreeBSD$");
 
 static void userboot_zfs_probe(void);
 static int userboot_zfs_found;
-static void init_zfs_bootenv(char *currdev);
 #endif
 
+/* Minimum version required */
 #define	USERBOOT_VERSION	USERBOOT_VERSION_3
 
 #define	MALLOCSZ		(10*1024*1024)
@@ -65,7 +65,7 @@ void
 delay(int usec)
 {
 
-        CALLBACK(delay, usec);
+	CALLBACK(delay, usec);
 }
 
 void
@@ -83,11 +83,11 @@ loader_main(struct loader_callbacks *cb, void *arg, int version, int ndisks)
 	const char *var;
 	int i;
 
-        if (version != USERBOOT_VERSION)
-                abort();
+	if (version < USERBOOT_VERSION)
+		abort();
 
 	callbacks = cb;
-        callbacks_arg = arg;
+	callbacks_arg = arg;
 	userboot_disk_maxunit = ndisks;
 
 	/*
@@ -96,9 +96,9 @@ loader_main(struct loader_callbacks *cb, void *arg, int version, int ndisks)
 	 */
 	setheap((void *)mallocbuf, (void *)(mallocbuf + sizeof(mallocbuf)));
 
-        /*
-         * Hook up the console
-         */
+	/*
+	 * Hook up the console
+	 */
 	cons_probe();
 
 	printf("\n");
@@ -130,6 +130,10 @@ loader_main(struct loader_callbacks *cb, void *arg, int version, int ndisks)
 	archsw.arch_zfs_probe = userboot_zfs_probe;
 #endif
 
+	/*
+	 * Initialise the block cache. Set the upper limit.
+	 */
+	bcache_init(32768, 512);
 	/*
 	 * March through the device switch probing for things.
 	 */
@@ -168,6 +172,7 @@ extract_currdev(void)
 		zdev.d_type = zdev.d_dev->dv_type;
 		
 		dev = *(struct disk_devdesc *)&zdev;
+		init_zfs_bootenv(zfs_fmtdev(&dev));
 	} else
 #endif
 
@@ -191,40 +196,13 @@ extract_currdev(void)
 		dev.d_unit = 0;
 	}
 
-#if defined(USERBOOT_ZFS_SUPPORT)
-	init_zfs_bootenv(zfs_fmtdev(&dev));
-#endif
-
 	env_setenv("currdev", EV_VOLATILE, userboot_fmtdev(&dev),
-            userboot_setcurrdev, env_nounset);
+	    userboot_setcurrdev, env_nounset);
 	env_setenv("loaddev", EV_VOLATILE, userboot_fmtdev(&dev),
-            env_noset, env_nounset);
+	    env_noset, env_nounset);
 }
 
 #if defined(USERBOOT_ZFS_SUPPORT)
-static void
-init_zfs_bootenv(char *currdev)
-{
-	char *beroot;
-
-	/* Remove the trailing : */
-	currdev[strlen(currdev) - 1] = '\0';
-	setenv("zfs_be_active", currdev, 1);
-	/* Do not overwrite if already set */
-	setenv("vfs.root.mountfrom", currdev, 0);
-	/* Forward past zfs: */
-	currdev = strchr(currdev, ':');
-	currdev++;
-	/* Remove the last element (current bootenv) */
-	beroot = strrchr(currdev, '/');
-	if (beroot != NULL)
-		beroot[0] = '\0';
-
-	beroot = currdev;
-	
-	setenv("zfs_be_root", beroot, 1);
-}
-
 static void
 userboot_zfs_probe(void)
 {
@@ -273,6 +251,7 @@ static int
 command_reloadbe(int argc, char *argv[])
 {
 	int err;
+	char *root;
 
 	if (argc > 2) {
 		command_errmsg = "wrong number of arguments";
@@ -282,7 +261,11 @@ command_reloadbe(int argc, char *argv[])
 	if (argc == 2) {
 		err = zfs_bootenv(argv[1]);
 	} else {
-		err = zfs_bootenv(getenv("zfs_be_root"));
+		root = getenv("zfs_be_root");
+		if (root == NULL) {
+			return (CMD_OK);
+		}
+		err = zfs_bootenv(root);
 	}
 
 	if (err != 0) {
